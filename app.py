@@ -1,81 +1,67 @@
 from flask import Flask, render_template, request
 import os
 import re
-from langchain_openai import ChatOpenAI
+from langchain_openai import OpenAI
 from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain
+from langchain.schema.runnable import RunnableLambda
+
+# Load API Key securely (Use .env in production)
+os.environ["OPENAI_API_KEY"] = "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"
 
 # Initialize Flask App
 app = Flask(__name__)
-from dotenv import load_dotenv
-import os
 
-# Load environment variables
-load_dotenv()
+# Initialize OpenAI Model (Lower temperature for strict format)
+llm_restro = OpenAI(temperature=0.1)  # Strict AI response
 
-# Access API key
-os.environ["OPENAI_API_KEY"] = "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"
-
-
-# Load API key securely from an environment variable (NEVER expose it in code!)
-
-
-# Check if API key exists
-if not api_key:
-    raise ValueError("❌ OpenAI API Key is missing! Set the 'OPENAI_API_KEY' environment variable.")
-
-# Initialize OpenAI model (Use ChatOpenAI for better results)
-llm_restro = ChatOpenAI(model="gpt-3.5-turbo", temperature=0.7, openai_api_key=api_key)
-
-# Function to calculate BMI
-def calculate_bmi(weight, height):
-    try:
-        weight = float(weight)
-        height = float(height)
-        bmi = round(weight / (height ** 2), 2)  # BMI Formula
-        return bmi
-    except ValueError:
-        return None
-
-# Function to categorize BMI
-def bmi_category(bmi):
-    if bmi < 18.5:
-        return "Underweight 🥺 – we need to feed you!"
-    elif 18.5 <= bmi < 24.9:
-        return "Normal weight ✨ – Look at you! Just the right balance!"
-    elif 25 <= bmi < 29.9:
-        return "Overweight 😅 – Alright, time to move that cute body!"
-    else:
-        return "Obese 😭 – Sweetie, we need to fix this ASAP!"
-
-# Define Prompt Template (More human-like, fun, and engaging)
+# **AI Prompt Template (Ensuring AI follows format)**
 prompt_template_resto = PromptTemplate(
-    input_variables=["age", "weight", "height", "gender", "veg_or_nonveg", "disease", "allergics", "foodtype", "bmi", "bmi_category"],
+    input_variables=["age", "weight", "height", "bmi", "gender", "veg_or_nonveg", "disease", "allergics", "foodtype"],
     template="""
-    Hey ! 💕 Based on your details:
-    - Age: {age}
-    - Weight: {weight}
-    - Height: {height}
-    - Gender: {gender}
-    - Dietary Preference: {veg_or_nonveg}
-    - Medical Condition: {disease}
-    - Allergies: {allergics}
-    - Food Type: {foodtype}
-    - BMI: {bmi} ({bmi_category})
+    📢 Hello! I'm **Coach Lily**, your friendly health instructor! 💪  
+    I will **PERSONALLY design** a **perfect plan** for you, based on your BMI.  
 
-    Here’s my fabulous advice for you! 😘
+    **📝 First, let's calculate your BMI:**  
+    📊 **Formula:** BMI = weight / (height * height)  
+    **💡 Your details:**  
+    - **Age:** {age}  
+    - **Height:** {height} m  
+    - **Weight:** {weight} kg  
+    - **BMI:** {bmi}  
+    - **Gender:** {gender}  
+    - **Food Preference:** {veg_or_nonveg}  
+    - **Health Conditions:** {disease}  
+    - **Allergies:** {allergics}  
+    - **Preferred Diet:** {foodtype}  
 
-    💖 **Daily Routine:**  
-    - [Give 3-5 routine suggestions with a fun and sassy touch]  
+    🔥 **I will now provide you with:**  
+    ✅ 6 daily morning routine tips 🌅  
+    ✅ 6 delicious breakfast ideas 🍳  
+    ✅ 6 healthy dinner meals 🍽️  
+    ✅ 6 power-packed workout plans 🏋️  
 
-    🍳 **Breakfast:**  
-    - [List 3-4 yummy but healthy breakfast items]  
+    **FORMAT RESPONSE EXACTLY LIKE THIS (NO EXTRA TEXT!):**  
+    ---
+    📊 **Your BMI Category:** (Underweight, Normal, Overweight, Obese)  
+    🌅 **Daily Routine Recommendations:**  
+    1. Example Routine 1  
+    2. Example Routine 2  
+    ...  
 
-    🍽 **Dinner:**  
-    - [Suggest 3-4 tasty yet balanced dinner ideas]  
+    🥞 **Recommended Breakfast:**  
+    1. Example Breakfast 1  
+    2. Example Breakfast 2  
+    ...  
 
-    🏋️‍♀️ **Workout Plan:**  
-    - [List 3-4 exercises to keep that body in shape]
+    🍽️ **Recommended Dinner:**  
+    1. Example Dinner 1  
+    2. Example Dinner 2  
+    ...  
+
+    🏋️ **Recommended Workouts:**  
+    1. Example Workout 1  
+    2. Example Workout 2  
+    ...
     """
 )
 
@@ -85,6 +71,7 @@ def home():
 
 @app.route('/recommend', methods=['POST'])
 def recommend():
+    # **Get user input**
     age = request.form.get('age', '').strip()
     gender = request.form.get('gender', '').strip()
     weight = request.form.get('weight', '').strip()
@@ -94,20 +81,34 @@ def recommend():
     allergic = request.form.get('allergics', '').strip()
     food_type = request.form.get('foodtype', '').strip()
 
-    if not all([age, gender, weight, height, disease, veg_or_nonveg, allergic, food_type]):
-        return "⚠️ you forgot to fill in some details! Help me help you. 😘", 400
+    # **Validate input**
+    if not all([age, gender, weight, height, veg_or_nonveg, allergic, food_type]):
+        return "⚠️ Oops! Please fill in all required fields.", 400
 
-    bmi = calculate_bmi(weight, height)
-    if bmi is None:
-        return "⚠️ Oops! Your weight or height isn’t valid, love. Try again. 😭", 400
+    # **Calculate BMI**
+    try:
+        weight = float(weight)
+        height = float(height)
+        bmi = round(weight / (height * height), 2)
+    except ValueError:
+        return "⚠️ Error: Invalid height or weight values.", 400
 
-    bmi_status = bmi_category(bmi)
+    # **Determine BMI Category**
+    if bmi < 18.5:
+        bmi_category = "Underweight 😟 (Time to fuel up! 🥑)"
+    elif 18.5 <= bmi < 24.9:
+        bmi_category = "Normal 💪 (You're in great shape! Keep going! 🔥)"
+    elif 25 <= bmi < 29.9:
+        bmi_category = "Overweight 😕 (Let's tweak that routine! 🚴)"
+    else:
+        bmi_category = "Obese 🚨 (Time for a power-packed transformation! 🚀)"
+
+    # **Prepare Input for AI**
     input_data = {
         "age": age,
         "weight": weight,
         "height": height,
         "bmi": bmi,
-        "bmi_category": bmi_status,
         "gender": gender,
         "veg_or_nonveg": veg_or_nonveg,
         "disease": disease,
@@ -115,81 +116,36 @@ def recommend():
         "foodtype": food_type
     }
 
-    try:
-        # Debug: Print input data before making API call
-        print("📡 Sending Data to OpenAI:", input_data)
+    # **Generate AI recommendations using the new Runnable format**
+    chain = prompt_template_resto | llm_restro
+    response = chain.invoke(input_data)
 
-        chain = LLMChain(llm=llm_restro, prompt=prompt_template_resto)
-        response = chain.run(input_data)
+    # **Fix AI Output Encoding Issues**
+    response = response.encode("utf-8", "ignore").decode("utf-8")
 
-        print("🤖 AI Response:", response)  # DEBUG: Check AI output
+    # **Extract information using regex**
+    bmi_category_ai = re.search(r"📊 \*\*Your BMI Category\*\*:\s*(.*)", response)
+    daily_routine = re.search(r"🌅 \*\*Daily Routine Recommendations:\*\*\s*(.*?)\s*🥞", response, re.DOTALL)
+    breakfast_items = re.search(r"🥞 \*\*Recommended Breakfast.*?\*\*\s*(.*?)\s*🍽️", response, re.DOTALL)
+    dinner_items = re.search(r"🍽️ \*\*Recommended Dinner.*?\*\*\s*(.*?)\s*🏋️", response, re.DOTALL)
+    workout_plans = re.search(r"🏋️ \*\*Recommended Workouts.*?\*\*\s*(.*)", response, re.DOTALL)
 
-        if not response.strip():
-            return "⚠️ Ugh, AI ghosted us! Try again later, love. 😢", 500
+    # **Convert extracted text to lists**
+    bmi_category = bmi_category_ai.group(1).strip() if bmi_category_ai else bmi_category
+    daily_routine = daily_routine.group(1).strip().split("\n") if daily_routine else ["⚠ AI forgot the routines! 😢"]
+    breakfast_items = breakfast_items.group(1).strip().split("\n") if breakfast_items else ["⚠ Breakfast ideas missing! 🍳"]
+    dinner_items = dinner_items.group(1).strip().split("\n") if dinner_items else ["⚠ No dinner ideas! 🍽️"]
+    workout_plans = workout_plans.group(1).strip().split("\n") if workout_plans else ["⚠ AI skipped workouts! 💪"]
 
-        # Extract data using improved regex
-        daily_routine = re.findall(r"💖\s*\*\*Daily Routine:\*\*\s*(.*?)(?=\n🍳|\Z)", response, re.DOTALL)
-        breakfast_items = re.findall(r"🍳\s*\*\*Breakfast:\*\*\s*(.*?)(?=\n🍽|\Z)", response, re.DOTALL)
-        dinner_items = re.findall(r"🍽\s*\*\*Dinner:\*\*\s*(.*?)(?=\n🏋️‍♀️|\Z)", response, re.DOTALL)
-        workout_plans = re.findall(r"🏋️‍♀️\s*\*\*Workout Plan:\*\*\s*(.*?)(?=\Z)", response, re.DOTALL)
-
-        return render_template(
-            'result.html',
-            bmi=bmi,
-            bmi_status=bmi_status,
-            daily_routine=daily_routine[0].split('\n') if daily_routine else ["⚠ No daily routine suggestions, blame AI!"],
-            breakfast_items=breakfast_items[0].split('\n') if breakfast_items else ["⚠ No breakfast? Tragic!"],
-            dinner_items=dinner_items[0].split('\n') if dinner_items else ["⚠ No dinner ideas? I'm disappointed 😞"],
-            workout_plans=workout_plans[0].split('\n') if workout_plans else ["⚠ No workouts? Lazy much? 😂"]
-        )
-    except Exception as e:
-        print("❌ Error:", e)
-        return f"⚠️ something went wrong! {e}", 500
-from flask import send_file
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
-
-def generate_pdf(bmi, bmi_status, daily_routine, breakfast_items, dinner_items, workout_plans):
-    pdf_path = "recommendations.pdf"
-    c = canvas.Canvas(pdf_path, pagesize=letter)
-    c.setFont("Helvetica-Bold", 16)
-    c.drawString(200, 750, "Diet & Workout Recommendations")
-    
-    c.setFont("Helvetica", 12)
-    c.drawString(100, 720, f"BMI: {bmi} ({bmi_status})")
-
-    y_position = 700
-    sections = {
-        "Daily Routine Recommendations": daily_routine,
-        "Recommended Breakfast": breakfast_items,
-        "Recommended Dinner": dinner_items,
-        "Recommended Workouts": workout_plans
-    }
-
-    for section, items in sections.items():
-        y_position -= 30
-        c.setFont("Helvetica-Bold", 14)
-        c.drawString(100, y_position, section)
-        
-        c.setFont("Helvetica", 12)
-        for item in items:
-            y_position -= 20
-            c.drawString(120, y_position, f"- {item}")
-
-    c.save()
-    return pdf_path
-
-@app.route('/download')
-def download():
-    pdf_path = generate_pdf(
-        request.args.get('bmi', ''),
-        request.args.get('bmi_status', ''),
-        request.args.getlist('daily_routine'),
-        request.args.getlist('breakfast_items'),
-        request.args.getlist('dinner_items'),
-        request.args.getlist('workout_plans')
+    return render_template(
+        'result.html',
+        bmi=bmi,
+        bmi_category=bmi_category,
+        daily_routine=daily_routine,
+        breakfast_items=breakfast_items,
+        dinner_items=dinner_items,
+        workout_plans=workout_plans
     )
-    return send_file(pdf_path, as_attachment=True)
 
 if __name__ == "__main__":
     app.run(debug=True)
