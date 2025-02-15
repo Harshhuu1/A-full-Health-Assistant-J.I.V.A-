@@ -14,7 +14,7 @@ import os
 load_dotenv()
 
 # Access API key
-api_key = "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"
+os.environ["OPENAI_API_KEY"] = "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"
 
 
 # Load API key securely from an environment variable (NEVER expose it in code!)
